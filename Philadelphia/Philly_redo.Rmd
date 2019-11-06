@@ -1,0 +1,134 @@
+
+```{r}
+# Philly_redo.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+library("plyr")
+
+#read tax data in
+philly_tax <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/Philly/2016_OPA_PROPERTIES.csv")
+
+#read energy data in
+philly <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/Philly/properties_reported_2016.csv")
+
+#rename columns
+names(philly) <- c("natural_gas_use_KBTU","building_id","LOC","property_name","opa_number","zip","num_buildings","year_built","property_type_primary_epa","floor_area_total_SF","electricity_use_KBTU","portfolio_manager_id","fuel_oil_use_KBTU","steam_use_KBTU","energy_star_score","site_eui_KBTUSF","source_eui_KBTUSF","h2o_use_allsources_KGAL","total_ghg_emissions_MTCO2e","notes","lat","lng")
+
+#merge by address left much fewer NAs than by geocoding
+philly<-join(philly,philly_tax,by=c("LOC"), type="left", match="first")
+write.csv(philly, file = "philly_merge_by_ADR.csv")
+
+
+#replace all occurrences of "Not Available" with NA
+for(i in 1:length(philly)){
+  philly[,i][philly[,i] == "Not Available"] = NA
+  philly[,i][philly[,i] == ""] = NA
+}
+
+#remove rows with no Site EUI data
+philly=philly[!is.na(philly$site_eui_KBTUSF),]
+
+#remove columns where >40% of rows are NA
+num_buildings=nrow(philly)
+cols=ncol(philly)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(philly[is.na(philly[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+philly=philly[,keep_cols]
+
+
+#force datatypes, pay attention to numerics, convert to character, and then use as.numeric(gsub(",","",boston$Total.Site.Energy..kBTU.))
+philly$num_buildings=as.character(philly$num_buildings)
+philly$num_buildings=as.numeric(gsub(",","",philly$num_buildings))
+
+philly$year_built=as.character(philly$year_built)
+philly$year_built=as.numeric(gsub(",","",philly$year_built))
+
+philly$floor_area_total_SF=as.character(philly$floor_area_total_SF)
+philly$floor_area_total_SF=as.numeric(gsub(",","",philly$floor_area_total_SF))
+
+philly$natural_gas_use_KBTU=as.character(philly$natural_gas_use_KBTU)
+philly$natural_gas_use_KBTU=as.numeric(gsub(",","",philly$natural_gas_use_KBTU))
+
+philly$electricity_use_KBTU=as.character(philly$electricity_use_KBTU)
+philly$electricity_use_KBTU=as.numeric(gsub(",","",philly$electricity_use_KBTU))
+
+philly$energy_star_score=as.character(philly$energy_star_score)
+philly$energy_star_score=as.numeric(gsub(",","",philly$energy_star_score))
+
+philly$site_eui_KBTUSF=as.character(philly$site_eui_KBTUSF)
+philly$site_eui_KBTUSF=as.numeric(gsub(",","",philly$site_eui_KBTUSF))
+
+philly$source_eui_KBTUSF=as.character(philly$source_eui_KBTUSF)
+philly$source_eui_KBTUSF=as.numeric(gsub(",","",philly$source_eui_KBTUSF))
+
+philly$h2o_use_allsources_KGAL=as.character(philly$h2o_use_allsources_KGAL)
+philly$h2o_use_allsources_KGAL=as.numeric(gsub(",","",philly$h2o_use_allsources_KGAL))
+
+philly$total_ghg_emissions_MTCO2e=as.character(philly$total_ghg_emissions_MTCO2e)
+philly$total_ghg_emissions_MTCO2e=as.numeric(gsub(",","",philly$total_ghg_emissions_MTCO2e))
+
+philly$property_name=as.character(philly$property_name)
+
+philly$zip=as.factor(philly$zip)
+philly$property_type_primary_epa=as.factor(philly$property_type_primary_epa)
+
+#remove outliers in site EUI now that datatype is applicable
+philly = philly[philly$site_eui_KBTUSF < (quantile(philly$site_eui_KBTUSF, 0.75,na.rm=TRUE) + 4*IQR(philly$site_eui_KBTUSF,na.rm=TRUE)),]
+philly = philly[philly$site_eui_KBTUSF > 1 ,]
+
+#calculate total energy
+philly$total_site_energy_KBTU=philly$floor_area_total_SF*philly$site_eui_KBTUSF
+philly$log_total_site_energy_KBTU=log(philly$total_site_energy_KBTU)
+
+#define feature and output lists for philly
+philly_features=c("num_buildings","year_built","property_type_primary_epa","floor_area_total_SF","h2o_use_allsources_KGAL","SALE_PR","SALE_TY","MV","TX_LND","TX_BLDG","XMPT_LND","XMPT_BLDG","CAT_CD","ZONE","FRT","DPT","TOT_AREA","TOP","GRG_TYP","GRG_SP","OFF_ST","VIEW_","STORIES","EXT_COND","NO_RM","NO_BD","NO_BATH","BASMT_SQFT","FIRE","INT_COND","TOT_LIV_AREA")
+philly_outputs=c("electricity_use_KBTU","energy_star_score","site_eui_KBTUSF","source_eui_KBTUSF","total_ghg_emissions_MTCO2e","total_site_energy_KBTU","log_total_site_energy_KBTU")
+
+#split into features and outputs
+x_philly=philly[,philly_features]
+y_philly=philly[,philly_outputs]
+
+#re-impute just using original features
+mi = mice(x_philly,m=3,maxit=3,method='cart')
+x_philly = complete(mi)
+
+#construct new features
+x_philly$building_value=x_philly$TX_BLDG+x_philly$XMPT_BLDG
+x_philly$value_per_SF=x_philly$building_value/x_philly$floor_area_total_SF
+
+#recreate final dataframe
+philly_final = cbind(x_philly,y_philly)
+
+#save cleaned data to csv file
+write.csv(x_philly, file = "philly_features.csv")
+write.csv(y_philly, file = "philly_outputs.csv")
+write.csv(philly_final, file = "philly_final.csv")
+```
+
+
+
+
+
+
+
+

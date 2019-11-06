@@ -1,0 +1,739 @@
+
+```{r}
+# Lasso_RandomForest.Rmd: This file contains the code for the main analysis of the paper. Specifically, 
+# this notebook runs a lasso regression and random forest model on the ten city datasets and the CBECS dataset. 
+# Additional functions are added to compute variable importance from theses models, which are run on each of 
+# the dataset independently. The datasets read in this file can be found in each of the subdirectories in this repository.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#important to have same seed for all model
+set.seed(88)
+
+#import relevant packages
+library(randomForest)
+library('glmnet')
+library('mice')
+library('rqPen')
+library('hqreg')
+library('readr')
+
+#read in all data -- from folder
+LA <- read.csv(".../LA_final.csv")
+DC <- read.csv(".../DC_final.csv")
+SF <- read.csv(".../SF_final.csv")
+MN <- read.csv(".../MN_final.csv")
+london <- read.csv(".../london_final.csv")
+boston <- read.csv(".../boston_final.csv")
+seattle <- read.csv(".../seattle_final.csv")
+chicago <- read.csv(".../chi_final.csv")
+philly <- read.csv(".../philly_final.csv")
+NYC <- read.csv(".../NYC_Imputed.csv")
+CBECS_2012 <- read_csv(".../CBECS_2012.csv")
+```
+
+```{r}
+#function to view variable importance in Lasso by discovering order variables are added to model as lambda is increased
+OLS_variable_importance = function(model) {
+  lambda = model$lambda.min
+  cv_num = which(model$lambda == lambda)
+  
+  model_coef = coef(model, s = "lambda.min")[,1]
+  model_coef = as.data.frame(t(model_coef))
+  #model_coef = as.data.frame( t(model_coef[abs(model_coef) > 0]) ) 
+  model_coef[,] = 0
+  
+  for(i in 1:cv_num){
+    curr_model = model$glmnet.fit$beta[,i]
+    pos_betas = colnames(as.data.frame(t(curr_model[abs(curr_model) > 0]))) # colnames of non_zero betas
+    model_coef[,pos_betas] = model_coef[,pos_betas]+1
+  }
+  
+  model_coef[,1] = NULL
+  model_coef=as.data.frame(model_coef)
+  model_coef=t(model_coef)
+  model_coef[,1]=sort(model_coef)
+
+  
+  par(las=2) # make label text perpendicular to axis
+  par(mar=c(5,18,4,2)) # increase y-axis margin.
+  barplot(model_coef[,1],main="Order of Variable Importance to Model",xlab="Number of Occurences",names.arg =rownames(model_coef[,1]), cex.names=0.8,horiz=TRUE)
+  
+}
+```
+
+```{r}
+#function to view variable importance in Random Forests
+var_imp_barplot = function(rf_model){
+  colnames(rf_model$importance)[2]="% Contribution to Decrease in Variance"
+  model_imp=rf_model$importance
+  model_imp[,2]=model_imp[,1]/sum(model_imp[,1])*100
+  model_imp=as.data.frame(model_imp)
+  model_imp[,1]=NULL
+  par(las=2) # make label text perpendicular to axis
+  par(mar=c(5,18,4,2)) # increase y-axis margin.
+  barplot(model_imp[,1],main="Percentage Contribution to Total Decrease in Variance",xlab="Percentage Contribution",names.arg=rownames(model_imp),cex.names=0.8,horiz=TRUE)
+  
+}
+```
+
+```{r}
+#function to score variables in Random Forest
+RF_var_score = function(rf_model){
+  colnames(rf_model$importance)[2]="% Contribution to Decrease in Variance"
+  model_imp=rf_model$importance
+  model_imp[,2]=model_imp[,1]/sum(model_imp[,1])*100
+  model_imp=as.data.frame(model_imp)
+  model_imp[,1]=NULL
+  model_imp
+}
+
+#function for discovering which variables are important in lasso models
+lasso_var_names = function(model){
+  lambda = model$lambda.min
+  cv_num = which(model$lambda == lambda)
+  
+  model_coef = coef(model, s = "lambda.min")[,1]
+  model_coef = as.data.frame(t(model_coef))
+  #model_coef = as.data.frame( t(model_coef[abs(model_coef) > 0]) ) 
+  model_coef[,] = 0
+  
+  for(i in 1:cv_num){
+    curr_model = model$glmnet.fit$beta[,i]
+    pos_betas = colnames(as.data.frame(t(curr_model[abs(curr_model) > 0]))) # colnames of non_zero betas
+    model_coef[,pos_betas] = model_coef[,pos_betas]+1
+  }
+  
+  model_coef[,1] = NULL
+  model_coef=as.data.frame(model_coef)
+  model_coef=t(model_coef)
+
+  
+  par(las=2) # make label text perpendicular to axis
+  par(mar=c(5,18,4,2)) # increase y-axis margin.
+  write.csv(as.data.frame(model_coef[,1]),paste(deparse(substitute(model)),".csv",sep=""))
+
+}
+
+```
+
+
+```{r}
+#define features
+
+colnames(NYC)
+#Collapsing all Other building types into one other category to have less than 53 variables
+NYC$Primary_Property_Type_._Self_Selected=gsub(".*Other.*", "Other", NYC$Primary_Property_Type_._Self_Selected)
+#force data type
+NYC$Primary_Property_Type_._Self_Selected=as.factor(NYC$Primary_Property_Type_._Self_Selected)
+NYC$Largest_Property_Use_Type=as.factor(NYC$Largest_Property_Use_Type)
+NYC$LandUse=as.factor(NYC$LandUse)
+NYC$Occupancy=as.numeric(NYC$Occupancy)
+NYC$ComArea=as.numeric(NYC$ComArea)
+NYC$BldgArea=as.numeric(NYC$BldgArea)
+NYC$LotArea=as.numeric(NYC$LotArea)
+NYC$ResArea=as.numeric(NYC$ResArea)
+NYC$OfficeArea=as.numeric(NYC$OfficeArea)
+NYC$RetailArea=as.numeric(NYC$RetailArea)
+NYC$GarageArea=as.numeric(NYC$GarageArea)
+NYC$StrgeArea=as.numeric(NYC$StrgeArea)
+NYC$FactryArea=as.numeric(NYC$FactryArea)
+NYC$OtherArea=as.numeric(NYC$OtherArea)
+NYC$Easements=as.numeric(NYC$Easements)
+NYC$NumBldgs=as.numeric(NYC$NumBldgs)
+NYC$NumFloors=as.numeric(NYC$NumFloors)
+NYC$UnitsRes=as.numeric(NYC$UnitsRes)
+NYC$UnitsTotal=as.numeric(NYC$UnitsTotal)
+
+x_NYC$log_land_value=log(x_NYC$AssessLand)
+x_NYC$log_primary_property_area=log(x_NYC$Largest_Property_Use_Type_._Gross_Floor_Area_.ft_.)
+NYC_forest=cbind(y_NYC,x_NYC)
+
+x_NYC=NYC[,c(2:62,65)]
+y_NYC = NYC['logkBTU']
+
+#one hot encode for lasso models so that factors are scored properly
+x_NYC_1hot=model.matrix( ~ .-1, x_NYC)
+#x_NYC_1hot=model.matrix(logkBTU~.,NYC_forest)[,-1]
+
+NYC_ols_1 = cv.glmnet(x=x_NYC_1hot, y=data.matrix(y_NYC), alpha = 1, type.measure="mse")
+coef(NYC_ols_1, s = "lambda.min")
+OLS_variable_importance(NYC_ols_1)
+plot(NYC_ols_1$cvm)
+min(NYC_ols_1$cvm)
+
+
+#NYC_rf_1<-randomForest(logkBTU ~ ., data=NYC_forest, importance=TRUE, na.action=na.omit)
+NYC_rf_1<-randomForest(logkBTU ~ Largest_Property_Use_Type_._Gross_Floor_Area_.ft_. + Year_Built + Number_of_Buildings_._Self.reported + Occupancy + LandUse + BldgArea + LotArea + ComArea + ResArea + OfficeArea + RetailArea + GarageArea + StrgeArea + FactryArea + OtherArea + Easements + UnitsRes + UnitsTotal + LotFront + LotDepth + LotType + BsmtCode + AssessLand + AssessTot + YearBuilt + YearAlter1 + YearAlter2 + BuiltFAR + ResidFAR + CommFAR + FacilFAR + BldgClass2 + PricePerSqFt + BuildPricePerSqFt + PercentOffice + PercentGarage + PercentRes + PercentCom + PercentStrge + PercentFactory + PercentOther + PercentRetail + Property_GFA_._Self.Reported_.ft_. + logPropertyArea + logAssessTot + logBldgArea + logComArea + logOfficeArea + logResArea + logGarage + logStrge + logFactory + logOther + logRetail + log_land_value + log_primary_property_area, data=NYC_forest,importance=TRUE, na.action = na.omit)
+varImpPlot(NYC_rf_1)
+NYC_rf_1
+var_imp_barplot(NYC_rf_1) 
+
+```
+
+```{r}
+#define features
+
+chicago_features=c("Primary.Property.Type","Gross.Floor.Area...Buildings..sq.ft.","Year.Built","X..of.Buildings")
+x_chicago=chicago[,chicago_features]
+colnames(x_chicago)
+x_chicago$log_floor_area=log(x_chicago$Gross.Floor.Area...Buildings..sq.ft.)
+y_chicago=chicago['log_total_site_energy_KBTU']
+
+#one hot encode for lasso models so that factors are scored properly
+x_chicago_1hot=model.matrix( ~ .-1, x_chicago)
+
+chicago_ols_1 = cv.glmnet(x=x_chicago_1hot, y=data.matrix(y_chicago), alpha = 1, type.measure="mse")
+coef(chicago_ols_1, s = "lambda.min")
+OLS_variable_importance(chicago_ols_1)
+plot(chicago_ols_1$cvm)
+min(chicago_ols_1$cvm)
+
+chicago_forest=cbind(y_chicago,x_chicago)
+chicago_rf_1 <- randomForest(log_total_site_energy_KBTU ~ ., data=chicago_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(chicago_rf_1)
+chicago_rf_1
+
+var_imp_barplot(chicago_rf_1)
+```
+
+```{r}
+#define features
+
+boston_features=c("reported","property_type","gross_area_SF","year_built","h2o_intensity_GALSF","zip","property_uses")
+x_boston=boston[,boston_features]
+x_boston$log_floor_area=log(x_boston$gross_area_SF)
+x_boston$water_use_total=x_boston$h2o_intensity_GALSF*x_boston$gross_area_SF
+x_boston$log_water_use=log(x_boston$water_use_total)
+y_boston=boston['log_total_site_energy_KBTU']
+
+for(i in 1:length(x_boston)){
+  x_boston[,i][is.infinite(x_boston[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_boston_1hot=model.matrix( ~ .-1, x_boston)
+
+boston_ols_1 = cv.glmnet(x=x_boston_1hot, y=data.matrix(y_boston), alpha = 1, type.measure="mse")
+coef(boston_ols_1, s = "lambda.min")
+OLS_variable_importance(boston_ols_1)
+plot(boston_ols_1$cvm)
+min(boston_ols_1$cvm)
+
+
+boston_forest=cbind(y_boston,x_boston)
+boston_forest$property_uses=NULL
+boston_forest$property_type=gsub(".*Other.*", "Other", boston_forest$property_type)
+boston_forest$property_type=as.factor(boston_forest$property_type)
+boston_rf_2 <- randomForest(log_total_site_energy_KBTU ~ ., data=boston_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(boston_rf_2)
+boston_rf_2
+
+var_imp_barplot(boston_rf_2)
+```
+
+```{r}
+#define features
+
+SF_features=c("floor_area_SF","property_type_self_reported","Neighborhood.Code","Volume.Number","Property.Class.Code","Year.Property.Built","Number.of.Bathrooms","Number.of.Bedrooms","Number.of.Rooms","Number.of.Stories","Number.of.Units","Zoning.Code","Construction.Type","Lot.Depth","Lot.Frontage","Property.Area.in.Square.Feet","Tax.Rate.Area.Code","Percent.of.Ownership","Closed.Roll.Misc.Exemption.Value","Closed.Roll.Homeowner.Exemption.Value","Closed.Roll.Assessed.Fixtures.Value","Closed.Roll.Assessed.Improvement.Value","Closed.Roll.Assessed.Land.Value","Closed.Roll.Assessed.Personal.Prop.Value","Supervisor.District","value_per_SF")
+y_SF=SF['log_total_site_energy_KBTU']
+
+x_SF=SF[,SF_features]
+for(i in 1:length(x_SF)){
+  x_SF[,i][x_SF[,i] == ""] = NA
+}
+
+#impute any missing data, done twice because not all was filled in
+mi = mice(x_SF,m=3,maxit=3,method='cart')
+x_SF = complete(mi)
+mi = mice(x_SF,m=3,maxit=3,method='cart')
+x_SF = complete(mi)
+
+xx_SF=x_SF[,SF_features]
+
+colnames(xx_SF)
+xx_SF$log_floor_area=log(xx_SF$floor_area_SF)
+xx_SF$log_prop_area=log(xx_SF$Property.Area.in.Square.Feet)
+xx_SF$log_misc_xmpt_value=log(xx_SF$Closed.Roll.Misc.Exemption.Value)
+xx_SF$log_xmpt_value=log(xx_SF$Closed.Roll.Homeowner.Exemption.Value)
+xx_SF$log_fixt_value=log(xx_SF$Closed.Roll.Assessed.Fixtures.Value)
+xx_SF$log_imprvt_value=log(xx_SF$Closed.Roll.Assessed.Improvement.Value)
+xx_SF$log_land_value=log(xx_SF$Closed.Roll.Assessed.Land.Value)
+xx_SF$log_personal_value=log(xx_SF$Closed.Roll.Assessed.Personal.Prop.Value)
+
+for(i in 1:length(xx_SF)){
+  xx_SF[,i][is.infinite(xx_SF[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_SF_1hot=model.matrix( ~ .-1, xx_SF)
+
+SF_ols_1 = cv.glmnet(x=x_SF_1hot, y=data.matrix(y_SF), alpha = 1, type.measure="mse")
+coef(SF_ols_1, s = "lambda.min")
+OLS_variable_importance(SF_ols_1)
+min(SF_ols_1$cvm)
+
+
+SF_forest = cbind(xx_SF,y_SF)
+SF_rf_3=randomForest(log_total_site_energy_KBTU ~.,data = SF_forest,importance=TRUE, na.action=na.omit)
+varImpPlot(SF_rf_3)
+SF_rf_3
+var_imp_barplot(SF_rf_3)
+
+```
+
+```{r}
+#define features
+
+x_philly=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/philly_redo/philly_features.csv")
+y_philly=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/philly_redo/philly_outputs.csv")
+
+colnames(x_philly)
+x_philly$X=NULL
+x_philly$log_building_value=log(x_philly$building_value)
+x_philly$log_floor_area=log(x_philly$floor_area_total_SF)
+x_philly$log_h2o_use=log(x_philly$h2o_use_allsources_KGAL)
+x_philly$log_sale_price=log(x_philly$SALE_PR)
+x_philly$log_market_value=log(x_philly$MV)
+x_philly$log_tx_lnd=log(x_philly$TX_LND)
+x_philly$log_tx_bldg=log(x_philly$TX_BLDG)
+x_philly$log_xmpt_lnd=log(x_philly$XMPT_LND)
+x_philly$log_xmpt_bldg=log(x_philly$XMPT_BLDG)
+x_philly$log_tot_area=log(x_philly$TOT_AREA)
+x_philly$log_bsmt_area=log(x_philly$BASMT_SQFT)
+x_philly$log_liv_area=log(x_philly$TOT_LIV_AREA)
+
+for(i in 1:length(x_philly)){
+  x_philly[,i][is.infinite(x_philly[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_philly_1hot = model.matrix( ~ .-1, x_philly)
+
+philly_ols_1 = cv.glmnet(x=x_philly_1hot, y=data.matrix(y_philly$log_total_site_energy_KBTU), alpha = 1, type.measure="mse")
+coef(philly_ols_1, s = "lambda.min")
+#OLS_variable_importance(philly_ols_1)
+plot(philly_ols_1$cvm)
+min(philly_ols_1$cvm)
+
+colnames(x_philly)
+#Collapsing all Other building types into one other category to have less than 53 variables
+x_philly$property_type_primary_epa=gsub(".*Other.*", "Other", x_philly$property_type_primary_epa)
+#force data type
+x_philly$property_type_primary_epa=as.factor(x_philly$property_type_primary_epa)
+x_philly$value_per_SF=x_philly$TX_BLDG/x_philly$floor_area_total_SF
+
+philly_rf_1 <- randomForest(y_philly$log_total_site_energy_KBTU ~ ., data=x_philly, importance=TRUE, na.action=na.omit)
+varImpPlot(philly_rf_1)
+philly_rf_1
+
+var_imp_barplot(philly_rf_1)
+```
+
+```{r}
+#define features
+
+seattle_features=c("building_type","property_type_primary","zip","council_district_code","neighborhood","year_built","num_buildings","num_floors","gross_floor_area_total_SF","gross_floor_area_parking_SF","gross_floor_area_building_SF","property_type_first","gross_floor_area_property_type_first_SF")
+x_seattle=seattle[,seattle_features]
+y_seattle=seattle['log_total_site_energy_KBTU']
+
+colnames(x_seattle)
+x_seattle$log_total_area=log(x_seattle$gross_floor_area_total_SF)
+x_seattle$log_parking_area=log(x_seattle$gross_floor_area_parking_SF)
+x_seattle$log_bldg_area=log(x_seattle$gross_floor_area_building_SF)
+x_seattle$log_area_1=log(x_seattle$gross_floor_area_property_type_first_SF)
+
+for(i in 1:length(x_seattle)){
+  x_seattle[,i][is.infinite(x_seattle[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_seattle_1hot = model.matrix( ~ .-1, x_seattle)
+
+seattle_ols_1 = cv.glmnet(x=x_seattle_1hot, y=data.matrix(y_seattle), alpha = 1, type.measure="mse")
+coef(seattle_ols_1, s = "lambda.min")
+OLS_variable_importance(seattle_ols_1)
+plot(seattle_ols_1$cvm)
+min(seattle_ols_1$cvm)
+
+seattle_forest=cbind(y_seattle,x_seattle)
+#Collapsing all Other building types into one other category to have less than 53 variables
+seattle_forest$property_type_first=gsub(".*Other.*", "Other", seattle_forest$property_type_first)
+#force data type
+seattle_forest$property_type_first=as.factor(seattle_forest$property_type_first)
+
+seattle_rf_2 <- randomForest(log_total_site_energy_KBTU ~ ., data=seattle_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(seattle_rf_2)
+seattle_rf_2
+
+var_imp_barplot(seattle_rf_2)
+
+
+```
+
+```{r}
+#define features
+
+MN_features=c("property_type","year_built","floor_area_building_SF","floor_area_parking_SF","water_use_KGAL","ST_TYPE","ST_POST_DIR","MULTIPLE_USES","TAX_EXEMPT","PARCEL_AREA_SQFT","COMMUNITY","WARD","ZONING","LANDUSE","LANDVALUE","BUILDINGVALUE","TOTALVALUE","EXEMPTSTATUS","HOMESTEAD","BUILDINGUSE","YEARBUILT","ABOVEGROUNDAREA","NUM_STORIES","PRIMARYHEATING","CONSTRUCTIONTYPE","EXTERIORTYPE","ROOF","BATHROOMS","BEDROOMS","value_per_SF")
+
+x_MN = MN
+for(i in 1:length(x_MN)){
+  x_MN[,i][x_MN[,i] == ""] = NA
+}
+#impute any missing data, done twice because not all was filled in
+mi = mice(x_MN,m=3,maxit=3,method='cart')
+x_MN = complete(mi)
+mi = mice(x_MN,m=3,maxit=3,method='cart')
+x_MN = complete(mi)
+
+y_MN=MN$log_total_site_energy_KBTU
+
+xx_MN=x_MN[,MN_features]
+xx_MN$value_per_SF = xx_MN$BUILDINGVALUE/xx_MN$floor_area_building_SF
+
+colnames(xx_MN)
+xx_MN$log_bldg_area=log(xx_MN$floor_area_building_SF)
+xx_MN$log_parking_area=log(xx_MN$floor_area_parking_SF)
+xx_MN$log_water_use=log(xx_MN$water_use_KGAL)
+xx_MN$log_parcel_area=log(xx_MN$PARCEL_AREA_SQFT)
+xx_MN$log_land_value=log(xx_MN$LANDVALUE)
+xx_MN$log_bldg_value=log(xx_MN$BUILDINGVALUE)
+xx_MN$log_total_value=log(xx_MN$TOTALVALUE)
+xx_MN$log_abovegrnd_area=log(xx_MN$ABOVEGROUNDAREA)
+
+for(i in 1:length(xx_MN)){
+  xx_MN[,i][is.infinite(xx_MN[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_MN_1hot = model.matrix(~ .-1, xx_MN)
+
+MN_ols_1 = cv.glmnet(x=x_MN_1hot, y=data.matrix(y_MN), alpha = 1, type.measure="mse")
+coef(MN_ols_1, s = "lambda.min")
+OLS_variable_importance(MN_ols_1)
+plot(MN_ols_1$cvm)
+min(MN_ols_1$cvm)
+
+MN_forest = cbind(xx_MN,y_MN)
+MN_rf_3=randomForest(y_MN ~.,data = MN_forest,importance=TRUE, na.action=na.omit)
+varImpPlot(MN_rf_3)
+MN_rf_3
+var_imp_barplot(MN_rf_3)
+
+
+```
+
+```{r}
+#define features
+
+DC_features=c("report_status","ward","postal_code","year_built","primary_ptype_self","primary_ptype_epa","tax_record_floor_area","reported_gross_floor_area","water_use","metered_areas_energy","metered_areas_water")
+x_DC=DC[,DC_features]
+y_DC=DC['log_total_site_energy_KBTU']
+
+colnames(x_DC)
+x_DC$log_floor_area_tax=log(x_DC$tax_record_floor_area)
+x_DC$log_floor_area_reported=log(x_DC$reported_gross_floor_area)
+x_DC$log_water_use=log(x_DC$water_use)
+
+for(i in 1:length(x_DC)){
+  x_DC[,i][is.infinite(x_DC[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_DC_1hot = model.matrix(~ .-1, x_DC)
+
+DC_ols_1 = cv.glmnet(x = x_DC_1hot, y=data.matrix(y_DC), alpha = 1, type.measure="mse")
+coef(DC_ols_1, s = "lambda.min")
+OLS_variable_importance(DC_ols_1)
+min(DC_ols_1$cvm)
+
+
+DC_forest=cbind(y_DC,x_DC)
+DC_rf_2 <- randomForest(log_total_site_energy_KBTU ~ ., data=DC_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(DC_rf_2)
+DC_rf_2
+var_imp_barplot(DC_rf_2)
+
+
+
+unique(x_DC$metered_areas_energy)
+unique(x_DC$metered_areas_water)
+summary(lm(log_total_site_energy_KBTU ~. -postal_code - primary_ptype_self - primary_ptype_epa - water_use,data=cbind(x_DC,y_DC)))
+```
+
+```{r}
+#define features
+
+colnames(LA)
+LA_features=c("h2o_indoorallsources_KGAL","property_gfa_self_reported_SF","department","h2o_allsources_KGAL")
+x_LA=LA[,LA_features]
+y_LA = LA['log_total_site_energy_KBTU']
+
+x_LA$log_water_indoor=log(x_LA$h2o_indoorallsources_KGAL)
+x_LA$log_water_all=log(x_LA$h2o_allsources_KGAL)
+x_LA$log_area=log(x_LA$property_gfa_self_reported_SF)
+
+for(i in 1:length(x_LA)){
+  x_LA[,i][is.infinite(x_LA[,i])] = 0
+}
+
+#one hot encode for lasso models so that factors are scored properly
+x_LA_1hot = model.matrix(~ .-1, x_LA)
+
+LA_ols_1 = cv.glmnet(x = x_LA_1hot, y = data.matrix(y_LA), alpha = 1, type.measure="mse")
+coef(LA_ols_1, s = "lambda.min")
+OLS_variable_importance(LA_ols_1)
+plot(LA_ols_1$cvm)
+min(LA_ols_1$cvm)
+
+
+LA_forest=cbind(y_LA,x_LA)
+
+LA_rf_1 <- randomForest(log_total_site_energy_KBTU~., data=LA_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(LA_rf_1)
+LA_rf_1
+var_imp_barplot(LA_rf_1)
+
+LA_rf_2 <- randomForest(log_total_site_energy_KBTU~ log_area+property_gfa_self_reported_SF+department, data=LA_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(LA_rf_2)
+LA_rf_2
+var_imp_barplot(LA_rf_2)
+
+
+
+```
+
+```{r}
+#define features
+london_features=c("heating_fuel_type","hvac_type","typical_fuel_eui_KWHM2","typical_electricity_eui_KWHM2","floor_area_SF")
+x_london=london[,london_features]
+y_london=london['log_total_site_energy_KBTU']
+
+x_london$log_area=log(x_london$floor_area_SF)
+
+#one hot encode for lasso models so that factors are scored properly
+x_london_1hot = model.matrix(~ .-1, x_london)
+
+london_ols_1 = cv.glmnet(x = x_london_1hot, y=data.matrix(y_london), alpha = 1, type.measure="mse")
+coef(london_ols_1, s = "lambda.min")
+OLS_variable_importance(london_ols_1)
+plot(london_ols_1$cvm)
+min(london_ols_1$cvm)
+
+london_forest=cbind(y_london,x_london)
+london_rf_2 <- randomForest(log_total_site_energy_KBTU ~ ., data=london_forest, importance=TRUE, na.action=na.omit)
+varImpPlot(london_rf_2)
+london_rf_2
+
+var_imp_barplot(london_rf_2)
+
+
+```
+
+```{r}
+######
+CBECS_imputed = CBECS_2012
+CBECS_imputed[is.na(CBECS_imputed)] <- 0
+
+# CBECS features that MAY be possible to collect
+cbecs_features = c('REGION','CENDIV','PBA','FREESTN','SQFT','SQFTC','WLCNS','RFCNS','RFTILT','BLDSHP','GLSSPC','EQGLSS','NFLOOR','BASEMNT','FLCEILHT','NELVTR','NESLTR','YRCON','YRCONC','RENOV','RENADD','RENRFF','RENWLL','RENWIN','RENHVC','RENLGT','RENINS','ACT1','ACT2','ACT3','ACT1PCT','ACT2PCT','ACT3PCT','PBAPLUS','VACANT','CUBE','CUBEC','FDSEAT','LODGRM','COURT','FACIL','FACACT','GOVTYP','OWNTYPE','NOCC','NOCCAT','MONUSE','OCCUPYP','LODOCCP','OPEN24','WKHRS','WKHRSC','NWKER','NWKERC','HEATP','MAINHT','COOLP','MAINCL','HWRDHT','HWRDCL','WTHTEQ','AMIMETER','ENRGYPLN','CONFSPP','MEDEQP','RFGWIN','HDD65','CDD65','PUBCLIM','EMCS','WINTYP','POOL')
+                  
+# Variables to log transform
+to_log = c('SQFT','NWKER','HDD65','CDD65')
+
+# Variables to change into factors
+to_factor = c('REGION','CENDIV','PBA','FREESTN','SQFTC','WLCNS','RFCNS','RFTILT','BLDSHP','GLSSPC','EQGLSS','YRCONC','RENOV','RENADD','RENRFF','RENWLL','RENWIN','RENHVC','RENLGT','RENINS','ACT1','ACT2','ACT3','PBAPLUS','VACANT','CUBE','CUBEC','COURT','FACIL','FACACT','GOVTYP','OWNTYPE','NOCCAT','WKHRSC','NWKERC','MAINHT','MAINCL','HWRDHT','HWRDCL','WTHTEQ','AMIMETER','ENRGYPLN','MEDEQP','PUBCLIM','EMCS','WINTYP','POOL')
+
+
+# Prepare data
+CBECS_x = CBECS_imputed[,cbecs_features]
+CBECS_x$LOG_SQFT = log(CBECS_x$SQFT)
+CBECS_x$LOG_NWKER = log(CBECS_x$NWKER)
+CBECS_x$LOG_HDD65 = log(CBECS_x$HDD65)
+CBECS_x$LOG_CDD65 = log(CBECS_x$CDD65)
+CBECS_x[to_factor] = lapply(CBECS_x[to_factor], factor)
+CBECS_x[] = lapply(CBECS_x, function(i) if(is.numeric(i)) ifelse(is.infinite(i), 0, i) else i)
+
+CBECS_y = log(CBECS_imputed$MFBTU)
+CBECS_y[is.infinite(CBECS_y)] = 0 
+CBECS = cbind(CBECS_x,CBECS_y)
+
+# Model whole dataset with LASSO
+CBECS_ols1 = cv.glmnet(model.matrix( ~. -1, CBECS_x), CBECS$CBECS_y, alpha = 1, type.measure="mse")
+coef(CBECS_ols1, s = "lambda.min")
+
+# Model whole dataset with RANDOM FORESTS
+CBECS_rf1 <- randomForest(CBECS_y ~. , data=CBECS, importance=TRUE, na.action=na.omit)
+varImpPlot(CBECS_rf1)
+var_imp_barplot(CBECS_rf1)
+
+CBECS_rf2 <- randomForest(CBECS_y ~ AMIMETER + PBAPLUS + PBA + LOG_SQFT + SQFT + WKHRS + SQFTC + LOG_NWKER + RFGWIN + OCCUPYP + FDSEAT + ENRGYPLN + NWKER + OWNTYPE + NELVTR + CENDIV + HWRDCL + NWKERC + EMCS + LOG_HDD65 + HDD65 + WKHRSC + POOL + NFLOOR,data=CBECS, importance=TRUE, na.action=na.omit)
+
+# Model dataset BY TYPE:
+cbecs_types = as.character(levels(unique(CBECS_x$PBA)))
+
+models = list()
+lowest_cv = rep(0,length(cbecs_types))
+
+models_rf = list()
+lowest_cv_rf = rep(0,length(cbecs_types))
+for(i in 1:length(cbecs_types)){
+  print(i)
+  CBECS_x2 = CBECS_x[CBECS_x$PBA == cbecs_types[i],]
+  CBECS_y2 = CBECS$CBECS_y[CBECS$PBA == cbecs_types[i]]
+  
+  # LASSO
+  CBECS_ols3_02 = cv.glmnet(model.matrix( ~. -1, CBECS_x2), CBECS_y2, alpha = 1, type.measure="mse")
+  #print(CBECS_ols3_02$cvm)
+  lowest_cv[i] = min(CBECS_ols3_02$cvm)
+  models[[length(models)+1]] = CBECS_ols3_02
+  
+  # RANDOM FORESTS
+  CBECS_rf2_02 <- randomForest(CBECS_y2 ~ AMIMETER + PBAPLUS + PBA + LOG_SQFT + SQFT + WKHRS + SQFTC + LOG_NWKER + RFGWIN + OCCUPYP + FDSEAT + ENRGYPLN + NWKER + OWNTYPE + NELVTR + CENDIV + HWRDCL + NWKERC + EMCS + LOG_HDD65 + HDD65 + WKHRSC + POOL + NFLOOR,data=CBECS_x2, importance=TRUE, na.action=na.omit)
+  print(CBECS_rf2_02$mse)
+  lowest_cv_rf[i] = min(CBECS_rf2_02$mse)
+  models_rf[[length(models_rf)+1]] = CBECS_rf2_02
+}
+
+# Model dataset BY REGION 
+cbecs_regions = as.character(levels(unique(CBECS_x$CENDIV)))
+
+models2 = list()
+lowest_cv2 = rep(0,length(cbecs_regions))
+
+models2_rf = list()
+lowest_cv2_rf = rep(0,length(cbecs_regions))
+for(i in 1:length(cbecs_regions)){
+  print(i)
+  CBECS_x2 = CBECS_x[CBECS_x$PBA == cbecs_types[i],]
+  CBECS_y2 = CBECS$CBECS_y[CBECS$PBA == cbecs_types[i]]
+  
+  # LASSO
+  CBECS_ols3_02 = cv.glmnet(model.matrix( ~. -1, CBECS_x2), CBECS_y2, alpha = 1, type.measure="mse")
+  #print(CBECS_ols3_02$cvm)
+  lowest_cv2[i] = min(CBECS_ols3_02$cvm)
+  models2[[length(models2)+1]] = CBECS_ols3_02
+  
+  # RANDOM FORESTS
+  CBECS_rf2_03 <- randomForest(CBECS_y2 ~ AMIMETER + PBAPLUS + PBA + LOG_SQFT + SQFT + WKHRS + SQFTC + LOG_NWKER + RFGWIN + OCCUPYP + FDSEAT + ENRGYPLN + NWKER + OWNTYPE + NELVTR + CENDIV + HWRDCL + NWKERC + EMCS + LOG_HDD65 + HDD65 + WKHRSC + POOL + NFLOOR,data=CBECS_x2, importance=TRUE, na.action=na.omit)
+  print(CBECS_rf2_03$mse)
+  lowest_cv2_rf[i] = min(CBECS_rf2_03$mse)
+  models2_rf[[length(models2_rf)+1]] = CBECS_rf2_03
+}
+
+# Check R2 value
+cor(CBECS_rf2$predicted, CBECS$CBECS_y)^2
+
+```
+
+```{r}
+#view data to score variables
+min(NYC_ols_1$cvm)
+OLS_variable_importance(NYC_ols_1)
+NYC_rf_1
+var_imp_barplot(NYC_rf_1) 
+
+min(chicago_ols_1$cvm)
+OLS_variable_importance(chicago_ols_1)
+chicago_rf_1
+var_imp_barplot(chicago_rf_1)
+
+min(boston_ols_1$cvm)
+OLS_variable_importance(boston_ols_1)
+boston_rf_2
+var_imp_barplot(boston_rf_2)
+
+min(SF_ols_1$cvm)
+OLS_variable_importance(SF_ols_1)
+SF_rf_3
+var_imp_barplot(SF_rf_3)
+
+min(philly_ols_1$cvm)
+#OLS_variable_importance(philly_ols_1)
+philly_rf_1
+var_imp_barplot(philly_rf_1)
+
+min(seattle_ols_1$cvm)
+OLS_variable_importance(seattle_ols_1)
+seattle_rf_2
+var_imp_barplot(seattle_rf_2)
+
+min(MN_ols_1$cvm)
+OLS_variable_importance(MN_ols_1)
+MN_rf_3
+var_imp_barplot(MN_rf_3)
+
+min(DC_ols_1$cvm)
+OLS_variable_importance(DC_ols_1)
+DC_rf_2
+var_imp_barplot(DC_rf_2)
+
+min(LA_ols_1$cvm)
+OLS_variable_importance(LA_ols_1)
+LA_rf_1
+var_imp_barplot(LA_rf_1)
+
+min(london_ols_1$cvm)
+OLS_variable_importance(london_ols_1)
+london_rf_2
+var_imp_barplot(london_rf_2)
+
+min(CBECS_ols1$cvm)
+OLS_variable_importance(CBECS_ols1)
+CBECS_rf1
+var_imp_barplot(CBECS_rf1)
+
+
+NYC_scores=RF_var_score(NYC_rf_1)
+write.csv(NYC_scores,"NYC_scores.csv")
+
+chicago_scores=RF_var_score(chicago_rf_1)
+write.csv(chicago_scores,"chicago_scores.csv")
+
+boston_scores=RF_var_score(boston_rf_2)
+write.csv(boston_scores,"boston_scores.csv")
+
+sf_scores=RF_var_score(SF_rf_3)
+write.csv(sf_scores,"sf_scores.csv")
+
+philly_scores=RF_var_score(philly_rf_1)
+write.csv(philly_scores,"philly_scores.csv")
+
+seattle_scores=RF_var_score(seattle_rf_2)
+write.csv(seattle_scores,"seattle_scores.csv")
+
+mn_scores=RF_var_score(MN_rf_3)
+write.csv(mn_scores,"MN_scores.csv")
+
+dc_scores=RF_var_score(DC_rf_2)
+write.csv(dc_scores,"DC_scores.csv")
+
+la_scores=RF_var_score(LA_rf_1)
+write.csv(la_scores,"LA_scores.csv")
+
+london_scores=RF_var_score(london_rf_2)
+write.csv(london_scores,"london_scores.csv")
+
+CBECS_scores=RF_var_score(CBECS_rf1)
+write.csv(CBECS_scores,"CBECS_scores.csv")
+
+lasso_var_names(NYC_ols_1)
+lasso_var_names(chicago_ols_1)
+lasso_var_names(boston_ols_1)
+lasso_var_names(SF_ols_1)
+lasso_var_names(philly_ols_1)
+lasso_var_names(seattle_ols_1)
+lasso_var_names(MN_ols_1)
+lasso_var_names(DC_ols_1)
+lasso_var_names(LA_ols_1)
+lasso_var_names(london_ols_1)
+lasso_var_names(CBECS_ols1)
+```
+

@@ -1,0 +1,134 @@
+```{r}
+# Boston.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+library("plyr")
+
+#read in tax data
+boston_tax <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/Boston/ast2018full.csv")
+#read in energy data
+boston <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/Boston_redo/berdo2017.csv")
+
+#renaming column names
+names(boston) <- c("property_name", "reported","property_type","address","zip","gross_area_SF","site_eui_KBTUSF","energy_star_score","energy_star_cert","property_uses","year_built","ghg_emissions_MTCO2e","ghg_intens_KGCO2SF","total_site_energy_KBTU","electricity_percentage","gas_percentage","steam_percentage","h2o_intensity_GALSF","onsite_renewable_KWH","user_submitted_info","user_submitted_link","tax_parcel","years_reported")
+
+boston_tax$address=boston_tax$MAIL_ADDRESS
+
+#check data types
+sapply(boston_orig,class)
+
+#merge tax and energy data by address matching - very poor outcome of mismatching when doing by coordinates
+boston <- join(boston, boston_tax, by=c("address"), type="left", match="first")
+write.csv(boston,"boston_merged.csv")
+
+#replace all occurrences of "Not Available" with NA
+for(i in 1:length(boston)){
+  boston[,i][boston[,i] == "Not Available"] = NA
+  boston[,i][boston[,i] == ""] = NA
+}
+
+#remove rows with no Site EUI data
+boston=boston[!is.na(boston$site_eui_KBTUSF),]
+
+#remove columns where >40% of rows are NA
+num_buildings=nrow(boston)
+cols=ncol(boston)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(boston[is.na(boston[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+boston=boston[,keep_cols]
+
+#force datatypes, pay attention to numerics, convert to character, and then use as.numeric(gsub(",","",boston$Total.Site.Energy..kBTU.))
+boston$gross_area_SF=as.character(boston$gross_area_SF)
+boston$gross_area_SF=as.numeric(gsub(",","",boston$gross_area_SF))
+
+boston$site_eui_KBTUSF=as.character(boston$site_eui_KBTUSF)
+boston$site_eui_KBTUSF=as.numeric(gsub(",","",boston$site_eui_KBTUSF))
+
+boston$total_site_energy_KBTU=as.character(boston$total_site_energy_KBTU)
+boston$total_site_energy_KBTU=as.numeric(gsub(",","",boston$total_site_energy_KBTU))
+
+boston$ghg_emissions_MTCO2e=as.character(boston$year_built)
+boston$ghg_emissions_MTCO2e=as.numeric(gsub(",","",boston$year_built))
+
+boston$ghg_intens_KGCO2SF=as.character(boston$ghg_intens_KGCO2SF)
+boston$ghg_intens_KGCO2SF=as.numeric(gsub(",","",boston$ghg_intens_KGCO2SF))
+
+boston$energy_star_score=as.character(boston$energy_star_score)
+boston$energy_star_score=as.numeric(gsub(",","",boston$energy_star_score))
+
+boston$h2o_intensity_GALSF=as.character(boston$h2o_intensity_GALSF)
+boston$h2o_intensity_GALSF=as.numeric(gsub(",","",boston$h2o_intensity_GALSF))
+
+boston$year_built=as.character(boston$year_built)
+boston$year_built=as.numeric(gsub(",","",boston$year_built))
+
+
+boston$gas_percentage=as.character(boston$gas_percentage)
+boston$gas_percentage=as.numeric(gsub("%","",boston$gas_percentage))
+
+boston$electricity_percentage=as.character(boston$electricity_percentage)
+boston$electricity_percentage=as.numeric(gsub("%","",boston$electricity_percentage))
+
+boston$property_name=as.character(boston$property_name)
+boston$reported=as.factor(boston$reported)
+boston$property_type=as.factor(boston$property_type)
+boston$property_uses=as.factor(boston$property_uses)
+boston$zip=as.factor(boston$zip)
+
+boston$tax_parcel=as.character(boston$tax_parcel)
+boston$years_reported=as.character(boston$years_reported)
+boston$address=as.character(boston$address)
+
+#remove outliers in site EUI now that datatype is applicable
+boston = boston[boston$site_eui_KBTUSF < (quantile(boston$site_eui_KBTUSF, 0.75,na.rm=TRUE) + 4*IQR(boston$site_eui_KBTUSF,na.rm=TRUE)),]
+boston = boston[boston$site_eui_KBTUSF > 1 ,]
+
+#calculate log total energy
+boston$log_total_site_energy_KBTU=log(boston$total_site_energy_KBTU)
+
+#define feature and output lists
+boston_features=c("reported","property_type","gross_area_SF","year_built","h2o_intensity_GALSF","zip","property_uses")
+boston_outputs=c("site_eui_KBTUSF","energy_star_score","ghg_emissions_MTCO2e","ghg_intens_KGCO2SF","total_site_energy_KBTU","log_total_site_energy_KBTU","electricity_percentage","gas_percentage")
+
+#split into features and outputs
+x_boston=boston[,boston_features]
+y_boston=boston[,boston_outputs]
+
+#re-impute just using original features
+mi = mice(x_boston,m=3,maxit=3,method='cart')
+x_boston = complete(mi)
+
+#recreate final dataframe
+boston_final = cbind(x_boston,y_boston)
+
+#save cleaned data to csv file
+write.csv(x_boston, file = "boston_features.csv")
+write.csv(y_boston, file = "boston_outputs.csv")
+write.csv(boston_final, file = "boston_final.csv")
+
+```
+
+
+
+
+

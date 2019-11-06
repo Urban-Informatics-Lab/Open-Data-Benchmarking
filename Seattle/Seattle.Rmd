@@ -1,0 +1,128 @@
+```{r}
+# Seattle.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+
+#READ IN DATA FOR MUNICIPAL AND COMMERCIAL BUILDINGS
+seattle <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/Seattle/2016_Building_Energy_Benchmarking.csv")
+names(seattle) <- c("building_id","year_collected","building_type","property_type_primary","property_name","address","city","state","zip","tax_id","council_district_code","neighborhood","lat","lng","year_built","num_buildings","num_floors","gross_floor_area_total_SF","gross_floor_area_parking_SF","gross_floor_area_building_SF","property_types_all","property_type_first","gross_floor_area_property_type_first_SF","property_type_second","gross_floor_area_property_type_second_SF","property_type_third","gross_floor_area_property_type_third_SF","years_energy_star_cert","energy_star_score","site_eui_KBTUSF","weather_norm_site_eui_KBTUSF","source_eui_KBTUSF","weather_norm_source_eui_KBTUSF","total_site_energy_KBTU","weather_norm_total_site_energy_KBTU","steam_use_KBTU","electricity_KWH","electricity_KBTU","natural_gas_THERMS","natural_gas_KBTU","default_data","comments","compliance_status","outlier","total_ghg_emissions_MTCO2e","ghg_intensity_KGCO2e")
+
+#force datatypes
+seattle$building_id=as.numeric(seattle$building_id)
+seattle$year_collected=as.numeric(seattle$year_collected)
+seattle$building_type=as.character(seattle$building_type)
+seattle$property_type_primary=as.character(seattle$property_type_primary)
+seattle$property_name=as.character(seattle$property_name)
+seattle$address=as.character(seattle$address)
+seattle$city=as.character(seattle$city)
+seattle$state=as.character(seattle$state)
+seattle$zip=as.numeric(seattle$zip)
+seattle$tax_id=as.numeric(seattle$tax_id)
+seattle$council_district_code=as.numeric(seattle$council_district_code)
+seattle$neighborhood=as.character(seattle$neighborhood)
+seattle$lat=as.numeric(seattle$lat)
+seattle$lng=as.numeric(seattle$lng)
+seattle$year_built=as.numeric(seattle$year_built)
+seattle$num_buildings=as.numeric(seattle$num_buildings)
+seattle$num_floors=as.numeric(seattle$num_floors)
+seattle$gross_floor_area_total_SF=as.numeric(seattle$gross_floor_area_total_SF)
+seattle$gross_floor_area_parking_SF=as.numeric(seattle$gross_floor_area_parking_SF)
+seattle$gross_floor_area_building_SF=as.numeric(seattle$gross_floor_area_building_SF)
+seattle$property_types_all=as.character(seattle$property_types_all)
+seattle$property_type_first=as.character(seattle$property_type_first)
+seattle$gross_floor_area_property_type_first_SF=as.numeric(seattle$gross_floor_area_property_type_first_SF)
+seattle$property_type_second=as.character(seattle$property_type_second)
+seattle$gross_floor_area_property_type_second_SF=as.numeric(seattle$gross_floor_area_property_type_second_SF)
+seattle$property_type_third=as.character(seattle$property_type_third)
+seattle$gross_floor_area_property_type_third_SF=as.numeric(seattle$gross_floor_area_property_type_third_SF)
+seattle$years_energy_star_cert=as.character(seattle$years_energy_star_cert)
+seattle$energy_star_score=as.numeric(seattle$energy_star_score)
+seattle$site_eui_KBTUSF=as.numeric(seattle$site_eui_KBTUSF)
+seattle$weather_norm_site_eui_KBTUSF=as.numeric(seattle$weather_norm_site_eui_KBTUSF)
+seattle$source_eui_KBTUSF=as.numeric(seattle$source_eui_KBTUSF)
+seattle$weather_norm_source_eui_KBTUSF=as.numeric(seattle$weather_norm_source_eui_KBTUSF)
+seattle$total_site_energy_KBTU=as.numeric(seattle$total_site_energy_KBTU)
+seattle$weather_norm_total_site_energy_KBTU=as.numeric(seattle$weather_norm_total_site_energy_KBTU)
+seattle$steam_use_KBTU=as.numeric(seattle$steam_use_KBTU)
+seattle$electricity_KWH=as.numeric(seattle$electricity_KWH)
+seattle$electricity_KBTU=as.numeric(seattle$electricity_KBTU)
+seattle$natural_gas_THERMS=as.numeric(seattle$natural_gas_THERMS)
+seattle$natural_gas_KBTU=as.numeric(seattle$natural_gas_KBTU)
+seattle$default_data=as.character(seattle$default_data)
+seattle$comments=as.character(seattle$comments)
+seattle$compliance_status=as.character(seattle$compliance_status)
+seattle$outlier=as.factor(seattle$outlier)
+seattle$total_ghg_emissions_MTCO2e=as.numeric(seattle$total_ghg_emissions_MTCO2e)
+seattle$ghg_intensity_KGCO2e=as.numeric(seattle$ghg_intensity_KGCO2e)
+#calculate log of total site energy
+seattle$log_total_site_energy_KBTU=log(seattle$total_site_energy_KBTU)
+
+#remove outliers  
+seattle_outliers_removed = seattle[seattle$site_eui_KBTUSF < (quantile(seattle$site_eui_KBTUSF, 0.75,na.rm=TRUE) + 4*IQR(seattle$site_eui_KBTUSF,na.rm=TRUE)),]
+seattle_outliers_removed = seattle_outliers_removed[seattle_outliers_removed$site_eui_KBTUSF > 1 ,]
+
+#save cleaned data to csv file
+write.csv(seattle_outliers_removed, file = "Seattle_outliers_removed.csv")
+```
+
+```{r}
+
+summary(seattle$Outlier)
+seattle_nooutlier=seattle[seattle$Outlier=="",]
+write.csv(seattle_nooutlier, file = "seattle_outliers_removed.csv")
+seattle$source_energy_KBTU=seattle$SourceEUI.kBtu.sf.*seattle$PropertyGFABuilding.s.
+
+
+```
+
+```{r}
+seattle_outliers_removed_no_na=seattle_outliers_removed[!is.na(seattle_outliers_removed$site_eui_KBTUSF),]
+#write.csv(seattle_outliers_removed_no_na,file="seattle_impt_feats.csv")
+```
+
+```{r}
+#read in file with extraneous columns removed
+seattle_impt_feats=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/seattle/seattle_impt_feats.csv")
+
+#delete columns where >40% of buildings have NA value
+num_buildings=nrow(seattle_impt_feats)
+cols=ncol(seattle_impt_feats)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(seattle_impt_feats[is.na(seattle_impt_feats[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+removal_cols
+seattle_impt_feats_no_na=seattle_impt_feats[,keep_cols]
+
+#save file ready for imputation
+write.csv(seattle_impt_feats_no_na,"seattle_rdy4imputation.csv")
+sum(is.na(seattle_impt_feats_no_na))
+```
+```{r}
+#imputing values for NA on table without any energy data so as not to influence model results
+impute=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/impute/seattle_rdy4imputation.csv")
+mi = mice(impute,m=3,maxit=3,method='cart')
+seattle_imputed = complete(mi)
+write.csv(seattle_imputed,file="seattle_imputed.csv")
+#final dataset is created by adding all of the columns of relevant energy data to imputed data
+
+```
+

@@ -1,0 +1,171 @@
+
+```{r}
+# SF.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+
+#READ IN DATA FOR MUNICIPAL AND COMMERCIAL BUILDINGS
+sf_municipal <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/SF/Energy_Benchmarking__San_Francisco_Municipal_Buildings.csv")
+sf_commercial <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/SF/Existing_Commercial_Buildings_Energy_Performance_Ordinance_Report.csv")
+
+#rename columns in sf_municipal
+names(sf_municipal)<-c("SFPUC_code","property_name","notes","department","gen_bldg_cat","property_type","property_type_energy_star","year_built","year_renovated","floor_area_SF_2013","site_eui_KBTUSF_2013","energy_star_rating_2013")
+
+#force datatypes in sf_municipal
+sf_municipal$SFPUC_code=as.character(sf_municipal$SFPUC_code)
+sf_municipal$property_name=as.character(sf_municipal$property_name)
+sf_municipal$notes=as.character(sf_municipal$notes)
+sf_municipal$department=as.factor(sf_municipal$department)
+sf_municipal$gen_bldg_cat=as.factor(sf_municipal$gen_bldg_cat)
+sf_municipal$property_type=as.character(sf_municipal$property_type)
+sf_municipal$property_type_energy_star=as.character(sf_municipal$property_type_energy_star)
+sf_municipal$year_built=as.numeric(sf_municipal$year_built)
+sf_municipal$year_renovated=as.numeric(sf_municipal$year_renovated)
+sf_municipal$floor_area_SF_2013=as.numeric(sf_municipal$floor_area_SF_2013)
+sf_municipal$site_eui_KBTUSF_2013=as.numeric(sf_municipal$site_eui_KBTUSF_2013)
+sf_municipal$energy_star_rating_2013=as.numeric(sf_municipal$energy_star_rating_2013)
+
+#calculate total site energy
+sf_municipal$total_site_energy_KBTU=sf_municipal$floor_area_SF_2013*sf_municipal$site_eui_KBTUSF_2013
+sf_municipal$log_site_energy_KBTU=log(sf_municipal$total_site_energy_KBTU)
+
+#rename relevant column names in sf_commercial (2017 only)
+sf_commercial_2017=sf_commercial[1:37]
+names(sf_commercial_2017)<-c("parcel","property_name","property_address","zip","floor_area_SF","property_type_self_reported","full_address","benchmark_status_2017","reason_exempt_2017","pim_link","benchmark_status_2016","reason_exempt_2016","benchmark_status_2015","reason_exempt_2015","benchmark_status_2014","reason_exempt_2014","benchmark_status_2013","reason_exempt_2013","benchmark_status_2012","reason_exempt_2012","benchmark_status_2011","reason_exempt_2011","benchmark_status_2010","reason_exempt_2010","energy_audit_due_date","energy_audit_status","next_audit_due_date","next_audit_status","energy_star_score_2017","site_eui_KBTUSF_2017","source_eui_KBTUSF_2017","percent_better_nat_med_site_eui_2017","percent_better_nat_med_source_eui_2017","total_ghg_emissions_MTCO2e_2017","total_ghg_intensity_kgCO2eSF_2017","weather_norm_site_eui_KBTUSF_2017","weather_norm_source_eui_KBTUSF_2017")
+
+#force datatypes in sf_commercial_2017
+sf_commercial_2017$property_name=as.character(sf_commercial_2017$property_name)
+sf_commercial_2017$property_address=as.character(sf_commercial_2017$property_address)
+sf_commercial_2017$zip=as.numeric(sf_commercial_2017$zip)
+sf_commercial_2017$floor_area_SF=as.numeric(sf_commercial_2017$floor_area_SF)
+sf_commercial_2017$property_type_self_reported=as.character(sf_commercial_2017$property_type_self_reported)
+sf_commercial_2017$full_address=as.character(sf_commercial_2017$full_address)
+sf_commercial_2017$benchmark_status_2017=as.factor(sf_commercial_2017$benchmark_status_2017)
+sf_commercial_2017$reason_exempt_2017=as.character(sf_commercial_2017$reason_exempt_2017)
+sf_commercial_2017$pim_link=as.character(sf_commercial_2017$pim_link)
+sf_commercial_2017$energy_audit_due_date=as.character(sf_commercial_2017$energy_audit_due_date)
+sf_commercial_2017$energy_audit_status=as.character(sf_commercial_2017$energy_audit_status)
+sf_commercial_2017$next_audit_due_date=as.character(sf_commercial_2017$next_audit_due_date)
+sf_commercial_2017$next_audit_status=as.character(sf_commercial_2017$next_audit_status)
+sf_commercial_2017$energy_star_score_2017=as.numeric(sf_commercial_2017$energy_star_score_2017)
+sf_commercial_2017$site_eui_KBTUSF_2017=as.numeric(sf_commercial_2017$site_eui_KBTUSF_2017)
+sf_commercial_2017$source_eui_KBTUSF_2017=as.numeric(sf_commercial_2017$source_eui_KBTUSF_2017)
+sf_commercial_2017$percent_better_nat_med_site_eui_2017=as.numeric(sf_commercial_2017$percent_better_nat_med_site_eui_2017)
+sf_commercial_2017$percent_better_nat_med_source_eui_2017=as.numeric(sf_commercial_2017$percent_better_nat_med_source_eui_2017)
+sf_commercial_2017$total_ghg_emissions_MTCO2e_2017=as.numeric(sf_commercial_2017$total_ghg_emissions_MTCO2e_2017)
+sf_commercial_2017$total_ghg_intensity_kgCO2eSF_2017=as.numeric(sf_commercial_2017$total_ghg_intensity_kgCO2eSF_2017)
+sf_commercial_2017$weather_norm_site_eui_KBTUSF_2017=as.numeric(sf_commercial_2017$weather_norm_site_eui_KBTUSF_2017)
+sf_commercial_2017$weather_norm_source_eui_KBTUSF_2017=as.numeric(sf_commercial_2017$weather_norm_source_eui_KBTUSF_2017)
+sf_commercial_2017$total_site_energy_KBTU=sf_commercial_2017$floor_area_SF*sf_commercial_2017$site_eui_KBTUSF_2017
+sf_commercial_2017$log_total_site_energy_KBTU=log(sf_commercial_2017$total_site_energy_KBTU)
+
+#remove outliers
+sf_municipal_outliers_cleaned = sf_municipal[sf_municipal$site_eui_KBTUSF_2013 < (quantile(sf_municipal$site_eui_KBTUSF_2013, 0.75,na.rm=TRUE) + 4*IQR(sf_municipal$site_eui_KBTUSF_2013,na.rm=TRUE)),]
+sf_municipal_outliers_cleaned = sf_municipal_outliers_cleaned[sf_municipal_outliers_cleaned$site_eui_KBTUSF_2013 > 1 ,]
+
+
+sf_commercial_2017_outliers_cleaned = sf_commercial_2017[sf_commercial_2017$site_eui_KBTUSF_2017 < (quantile(sf_commercial_2017$site_eui_KBTUSF_2017, 0.75,na.rm=TRUE) + 4*IQR(sf_commercial_2017$site_eui_KBTUSF_2017,na.rm=TRUE)),]
+sf_commercial_2017_outliers_cleaned = sf_commercial_2017_outliers_cleaned[sf_commercial_2017_outliers_cleaned$site_eui_KBTUSF_2017 > 1 ,]
+
+#save cleaned data to csv file
+write.csv(sf_municipal_outliers_cleaned, file = "SF_Muni_outliers_cleaned.csv")
+write.csv(sf_commercial_2017_outliers_cleaned, file = "SF_Comm_2017_outliers_cleaned.csv")
+```
+
+```{r}
+#reformatting energy data for geocoding
+sf_commercial_2017$property_address=as.character(sf_commercial_2017$property_address)
+sf_commercial_2017$address_reform=paste(sf_commercial_2017$property_address,", San Francisco, CA",sep="")
+write.csv(sf_commercial_2017$address_reform, "sf_addresses_energy.csv")
+
+#reformat tax data addresses for MN
+sf_tax <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/SF/tax_data_lat_lon.csv")
+
+sf_tax$address_reform=as.character(sf_tax$Property.Location)
+for (i in 1:length(sf_tax$address_reform)){
+  if (is.na(sf_tax$address_reform[i])){
+    next    
+  }
+  end=nchar(sf_tax$address_reform[i])-4
+  sf_tax$address_reform[i]=substring(sf_tax$address_reform[i],5,end)
+}
+
+sf_tax$address_reform2=paste(sf_tax$address_reform,", San Francisco, CA",sep="")
+write.csv(sf_tax$address_reform2, "sf_addresses_tax.csv")
+```
+
+
+```{r}
+#column bind geocoded addresses back to energy data - prepping for merge
+#adr is a temporary dataframe generated by the geocoding script
+sf_energy_geocoded = cbind(sf_commercial_2017,adr)
+write.csv(sf_energy_geocoded,"sf_energy_geocoded.csv")
+
+#column bind geocoded addresses back to tax data - prepping for merge
+#adr is a temporary dataframe generated by the geocoding script
+sf_tax_geocoded = cbind(sf_tax,adr)
+write.csv(sf_tax_geocoded,"sf_tax_geocoded.csv")
+
+#left join for energy and tax data based on matching coordinates, keeping all energy data
+library(plyr)
+sf_merged <- join(sf_energy_geocoded, sf_tax_geocoded, by=c("lat","lon"), type="left", match="first")
+write.csv(sf_merged,"SF_merged.csv")
+```
+
+
+```{r}
+#remove all buildings that do not have site eui data
+sf_merged_no_na=sf_merged[!is.na(sf_merged$site_eui_KBTUSF_2017),]
+
+#create file to delete extraneous columns in excel for ease
+#write.csv(sf_merged_no_na,file="SF_impt_feats.csv")
+```
+
+```{r}
+#read in file with extraneous columns removed
+SF_impt_feats=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/SF/SF_impt_feats.csv")
+
+#delete columns where >40% of buildings have NA value
+num_buildings=nrow(SF_impt_feats)
+cols=ncol(SF_impt_feats)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(SF_impt_feats[is.na(SF_impt_feats[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+removal_cols
+SF_impt_feats_no_na=SF_impt_feats[,keep_cols]
+
+#save file ready for imputation
+write.csv(SF_impt_feats_no_na,"SF_rdy4imputation.csv")
+sum(is.na(SF_impt_feats_no_na))
+
+```
+```{r}
+#imputing values for NA on table without any energy data so as not to influence model results
+impute=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/impute/SF_rdy4imputation.csv")
+mi = mice(impute,m=3,maxit=3,method='cart')
+SF_imputed = complete(mi)
+write.csv(SF_imputed,file="SF_imputed.csv")
+
+#final dataset is created by adding all of the columns of relevant energy data to imputed data
+```
+
+

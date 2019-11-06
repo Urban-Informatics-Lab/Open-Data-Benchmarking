@@ -1,0 +1,102 @@
+```{r}
+# LONDON.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+
+#READ IN DATA FOR MUNICIPAL AND COMMERCIAL BUILDINGS
+london <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/London/london_2010.csv")
+
+#rename columns
+names(london) <- c("rrn","related_rrn","issue_date","org_name","address_1","address_2","address_3","address_4","post_town","county","zip","energy_rating_band","energy_rating","total_CO2_emissions_MT","heating_fuel_type","hvac_type","floor_area_M2","fuel_eui_KWHM2","electricity_eui_KWHM2","typical_fuel_eui_KWHM2","typical_electricity_eui_KWHM2","renewables_percent_thermal","renewables_percent_electrical","total_heat_energy_KWH","total_electricity_KWH","total_heat_energy_typical_KWH","total_electricity_typical_KWH")
+
+#force datatypes
+london$rrn=as.character(london$rrn)
+london$related_rrn=as.character(london$related_rrn)
+london$issue_date=as.character(london$issue_date)
+london$org_name=as.character(london$org_name)
+london$address_1=as.character(london$address_1)
+london$address_2=as.character(london$address_2)
+london$address_3=as.character(london$address_3)
+london$address_4=as.character(london$address_4)
+london$post_town=as.character(london$post_town)
+london$county=as.character(london$county)
+london$zip=as.numeric(london$zip)
+london$energy_rating_band=as.character(london$energy_rating_band)
+london$energy_rating=as.numeric(london$energy_rating)
+london$total_CO2_emissions_MT=as.numeric(london$total_CO2_emissions_MT)
+london$heating_fuel_type=as.character(london$heating_fuel_type)
+london$hvac_type=as.character(london$hvac_type)
+london$floor_area_M2=as.numeric(london$floor_area_M2)
+london$fuel_eui_KWHM2=as.numeric(london$fuel_eui_KWHM2)
+london$electricity_eui_KWHM2=as.numeric(london$electricity_eui_KWHM2)
+london$typical_fuel_eui_KWHM2=as.numeric(london$typical_fuel_eui_KWHM2)
+london$typical_electricity_eui_KWHM2=as.numeric(london$typical_electricity_eui_KWHM2)
+london$renewables_percent_thermal=as.numeric(london$renewables_percent_thermal)
+london$renewables_percent_electrical=as.numeric(london$renewables_percent_electrical)
+london$total_heat_energy_KWH=as.numeric(london$total_heat_energy_KWH)
+london$total_electricity_KWH=as.numeric(london$total_electricity_KWH)
+london$total_heat_energy_typical_KWH=as.numeric(london$total_heat_energy_typical_KWH)
+london$total_electricity_typical_KWH=as.numeric(london$total_electricity_typical_KWH)
+
+#convert units and caculate total site energy use
+london$floor_area_SF=london$floor_area_M2*10.7639
+london$total_site_energy_KBTU = (london$total_heat_energy_KWH + london$total_electricity_KWH)*3.41214
+london$log_total_site_energy_KBTU=log(london$total_site_energy_KBTU)
+london$site_eui_KBTUSF = london$total_site_energy_KBTU/london$floor_area_SF
+
+#remove outliers
+london_outliers_removed = london[london$site_eui_KBTUSF < (quantile(london$site_eui_KBTUSF, 0.75,na.rm=TRUE) + 4*IQR(london$site_eui_KBTUSF,na.rm=TRUE)),]
+london_outliers_removed = london_outliers_removed[london_outliers_removed$site_eui_KBTUSF > 1 ,]
+
+#save cleaned data to csv file
+write.csv(london_outliers_removed, file = 'london_outliers_removed.csv')
+```
+
+```{r}
+london_outliers_removed_no_na=london_outliers_removed[!is.na(london_outliers_removed$site_eui_KBTUSF),]
+#write.csv(london_outliers_removed_no_na,file="london_impt_feats.csv")
+```
+
+```{r}
+#read in file with extraneous columns removed
+london_impt_feats=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/London/london_impt_feats.csv")
+
+#delete columns where >40% of buildings have NA value
+num_buildings=nrow(london_impt_feats)
+cols=ncol(london_impt_feats)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(london_impt_feats[is.na(london_impt_feats[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+removal_cols
+london_impt_feats_no_na=london_impt_feats[,keep_cols]
+
+#check if there are NA's for imputation, there is no need
+sum(is.na(london_impt_feats_no_na))
+
+#save final file
+write.csv(london_impt_feats_no_na,"london_final.csv")
+```
+
+
+
+
+

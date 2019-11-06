@@ -1,0 +1,94 @@
+```{r}
+# LA.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+
+#READ IN DATA FOR MUNICIPAL AND COMMERCIAL BUILDINGS
+la_muni <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/LA/Energy_and_Water_Use_-_Municipal_Buildings.csv")
+
+#renaming columns
+names(la_muni) <- c("carto_id","the_geom","h2o_indoorallsources_KGAL","energy_star_score","property_gfa_self_reported_SF","property_id","year_ending","department","property_name","ghg_emissions_indirect_MTCO2e","ghg_emissions_direct_MTCO2e","total_ghg_emissions_intensity_KGCO2eSF","total_ghg_emissions_MTCO2e","h2o_allsources_KGAL","weather_norm_source_eui_KBTUSF","weather_norm_site_eui_KBTUSF","source_eui_KBTUSF","site_eui_KBTUSF","address")
+
+#force datatypes
+la_muni$carto_id=as.character(la_muni$carto_id)
+la_muni$the_geom=as.character(la_muni$the_geom)
+la_muni$h2o_indoorallsources_KGAL=as.numeric(la_muni$h2o_indoorallsources_KGAL)
+la_muni$energy_star_score=as.numeric(la_muni$energy_star_score)
+la_muni$property_gfa_self_reported_SF=as.numeric(la_muni$property_gfa_self_reported_SF)
+la_muni$property_id=as.character(la_muni$property_id)
+la_muni$year_ending=as.character(la_muni$year_ending)
+la_muni$department=as.character(la_muni$department)
+la_muni$property_name=as.character(la_muni$property_name)
+la_muni$ghg_emissions_indirect_MTCO2e=as.numeric(la_muni$ghg_emissions_indirect_MTCO2e)
+la_muni$ghg_emissions_direct_MTCO2e=as.numeric(la_muni$ghg_emissions_direct_MTCO2e)
+la_muni$total_ghg_emissions_intensity_KGCO2eSF=as.numeric(la_muni$total_ghg_emissions_intensity_KGCO2eSF)
+la_muni$total_ghg_emissions_MTCO2e=as.numeric(la_muni$total_ghg_emissions_MTCO2e)
+la_muni$h2o_allsources_KGAL=as.numeric(la_muni$h2o_allsources_KGAL)
+la_muni$weather_norm_source_eui_KBTUSF=as.numeric(la_muni$weather_norm_source_eui_KBTUSF)
+la_muni$weather_norm_site_eui_KBTUSF=as.numeric(la_muni$weather_norm_site_eui_KBTUSF)
+la_muni$source_eui_KBTUSF=as.numeric(la_muni$source_eui_KBTUSF)
+la_muni$site_eui_KBTUSF=as.numeric(la_muni$site_eui_KBTUSF)
+la_muni$address=as.character(la_muni$address)
+
+#calculate total site energy
+la_muni$total_site_energy_KBTU=la_muni$property_gfa_self_reported_SF*la_muni$site_eui_KBTUSF
+la_muni$log_total_site_energy_KBTU=log(la_muni$total_site_energy_KBTU)
+
+#remove outliers
+LA_outliers_removed = la_muni[la_muni$site_eui_KBTUSF < (quantile(la_muni$site_eui_KBTUSF, 0.75,na.rm=TRUE) + 4*IQR(la_muni$site_eui_KBTUSF,na.rm=TRUE)),]
+LA_outliers_removed = LA_outliers_removed[LA_outliers_removed$site_eui_KBTUSF > 1 ,]
+
+#save cleaned data to csv file
+write.csv(LA_outliers_removed, file = 'LA_outliers_removed.csv')
+
+```
+
+```{r}
+#remove all buildings that do not have site eui data
+LA_outliers_removed_no_na=LA_outliers_removed[!is.na(LA_outliers_removed$site_eui_KBTUSF),]
+
+#create file to delete extraneous columns in excel for ease
+#write.csv(LA_outliers_removed_no_na, file="LA_impt_feats.csv")
+```
+
+```{r}
+#read in file with extraneous columns removed
+LA_impt_feats=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/LA/LA_impt_feats.csv")
+
+#delete columns where >40% of buildings have NA value
+num_buildings=nrow(LA_impt_feats)
+cols=ncol(LA_impt_feats)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(LA_impt_feats[is.na(LA_impt_feats[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+removal_cols
+LA_impt_feats_no_na=LA_impt_feats[,keep_cols]
+
+#check if there are NA's for imputation, there is no need
+sum(is.na(LA_impt_feats_no_na))
+
+#save final file
+write.csv(LA_impt_feats_no_na,"LA_final.csv")
+
+
+```
+

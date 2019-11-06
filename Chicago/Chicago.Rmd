@@ -1,0 +1,74 @@
+```{r}
+# Chicago.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for this city. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+chi <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/Chi/Chicago_Energy_Benchmarking_-_2016_Data_Reported_in_2017.csv")
+```
+
+```{r}
+#remove outliers in chicago
+chi_outliers_removed = chi[chi$Site.EUI..kBtu.sq.ft. < (quantile(chi$Site.EUI..kBtu.sq.ft., 0.75,na.rm=TRUE) + 4*IQR(chi$site_eui_KBTUSF,na.rm=TRUE)),]
+chi_outliers_removed = chi_outliers_removed[chi_outliers_removed$Site.EUI..kBtu.sq.ft. > 1 ,]
+write.csv(chi_outliers_removed,"chi_outliers_removed.csv")
+
+#remove all buildings that do not have site eui data
+chi_no_na=chi[!is.na(chi$Site.EUI..kBtu.sq.ft.),]
+
+#create file to delete extraneous columns in excel for ease
+write.csv(chi_no_na, file="chi_impt_feats.csv")
+
+#read in file with extraneous columns removed
+chi_impt_feats=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/chi/chi_impt_feats.csv")
+
+#delete columns where >40% of buildings have NA value
+num_buildings=nrow(chi_impt_feats)
+cols=ncol(chi_impt_feats)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(chi_impt_feats[is.na(chi_impt_feats[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+removal_cols
+chi_impt_feats_no_na=chi_impt_feats[,keep_cols]
+
+#save file ready for imputation
+write.csv(chi_impt_feats_no_na,"chi_rdy4imputation.csv")
+sum(is.na(chi_impt_feats_no_na))
+
+```
+
+```{r}
+#imputing values for NA on table without any energy data so as not to influence model results
+impute=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/impute/chi_rdy4imputation.csv")
+mi = mice(impute,m=3,maxit=3,method='cart')
+chi_imputed = complete(mi)
+write.csv(chi_imputed,file="chi_imputed.csv")
+
+```
+
+```{r}
+#final dataset is created by adding all of the columns of relevant energy data to imputed data
+#added two columns for total site energy and log of total site energy
+
+chi_final=read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/chi/chi_imputed_needsomecalcs.csv")
+chi_final$total_site_energy_KBTU=chi_final$Gross.Floor.Area...Buildings..sq.ft.*chi_final$Site.EUI..kBtu.sq.ft.
+chi_final$log_total_site_energy_KBTU=log(chi_final$total_site_energy_KBTU)
+write.csv(chi_final,file="chi_final.csv")
+```
+
+

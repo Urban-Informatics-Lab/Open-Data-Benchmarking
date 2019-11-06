@@ -1,0 +1,157 @@
+```{r}
+# DC_redo.Rmd: This file contains the code used for importing, cleaning, and preparing the public data
+# for Washington DC. The output of this file is the dataset used for modeling in the Lasso_RandomFores.Rmd script.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+library("stringr")
+library("dplyr")
+
+#read in tax data
+DC_tax_geocoded <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/DC_redo/DC_tax_geocoded.csv")
+
+#read in energy data
+DC_energy_geocoded <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/DC_redo/DC_energy_geocoded.csv")
+
+DC_orig <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/DC_redo/2016\ Energy\ and\ Water\ Performance\ Benchmarking\ Results\ as\ of\ 09-07-2017.csv")
+#remove all buildings that do not have site eui data
+DC_orig=DC_orig[DC_orig$site_eui!="",]
+
+#append lat/lon/score data to DC_orig
+DC_orig$lat=DC_energy_geocoded$lat
+DC_orig$lon=DC_energy_geocoded$lon
+
+#merge with DC_tax_geocoded
+DC <- join(DC_orig, DC_tax_geocoded, by=c("lat","lon"), type="left", match="first")
+write.csv(DC,"DC_merged.csv")
+
+#replace all occurrences of "Not Available" with NA
+for(i in 1:length(DC)){
+  DC[,i][DC[,i] == "Not Available"] = NA
+  DC[,i][DC[,i] == ""] = NA
+  DC[,i][DC[,i] == " "] = NA
+}
+
+#remove rows with no Site EUI data
+DC=DC[!is.na(DC$site_eui),]
+
+#remove columns where >40% of rows are NA
+num_buildings=nrow(DC)
+cols=ncol(DC)
+keep_cols=rep(NA,cols)
+removal_cols=rep(0,cols)
+for (i in 1:cols){
+keep_cols[i]=i
+percent_na=nrow(DC[is.na(DC[,i]),])/num_buildings
+  if (percent_na>0.40){
+    removal_cols[i]=i
+  }
+}
+keep_cols=keep_cols-removal_cols
+keep_cols=keep_cols[keep_cols!=0]
+DC=DC[,keep_cols]
+
+
+#force datatypes
+DC$lat=NULL
+DC$lon=NULL
+DC$pid=NULL
+DC$dc_real_pid=NULL
+DC$pm_pid=NULL
+DC$property_name=NULL
+DC$pm_parent_pid=NULL
+DC$parent_property_name=NULL
+DC$year_ending=NULL
+DC$address_of_record=NULL
+DC$owner_of_record=NULL
+DC$reported_address=NULL
+DC$city=NULL
+DC$state=NULL
+DC$latitude=NULL
+DC$longitude=NULL
+
+DC$year_built=as.character(DC$year_built)
+DC$year_built=as.numeric(gsub(",","",DC$year_built))
+
+DC$tax_record_floor_area=as.character(DC$tax_record_floor_area)
+DC$tax_record_floor_area=as.numeric(gsub(",","",DC$tax_record_floor_area))
+
+DC$reported_gross_floor_area=as.character(DC$reported_gross_floor_area)
+DC$reported_gross_floor_area=as.numeric(gsub(",","",DC$reported_gross_floor_area))
+
+DC$water_use=as.character(DC$water_use)
+DC$water_use=as.numeric(gsub(",","",DC$water_use))
+
+
+DC$site_eui=as.character(DC$site_eui)
+DC$site_eui=as.numeric(gsub(",","",DC$site_eui))
+
+DC$weather_norm_site_eui=as.character(DC$weather_norm_site_eui)
+DC$weather_norm_site_eui=as.numeric(gsub(",","",DC$weather_norm_site_eui))
+
+DC$source_eui=as.character(DC$source_eui)
+DC$source_eui=as.numeric(gsub(",","",DC$source_eui))
+
+DC$weather_norm_source_eui=as.character(DC$weather_norm_source_eui)
+DC$weather_norm_source_eui=as.numeric(gsub(",","",DC$weather_norm_source_eui))
+
+DC$total_ghg_emissions=as.character(DC$total_ghg_emissions)
+DC$total_ghg_emissions=as.numeric(gsub(",","",DC$total_ghg_emissions))
+
+DC$total_ghg_emissions_intensity=as.character(DC$total_ghg_emissions_intensity)
+DC$total_ghg_emissions_intensity=as.numeric(gsub(",","",DC$total_ghg_emissions_intensity))
+
+DC$energy_star_score=as.character(DC$energy_star_score)
+DC$energy_star_score=as.numeric(gsub(",","",DC$energy_star_score))
+
+DC$electricity_use=as.character(DC$electricity_use)
+DC$electricity_use=as.numeric(gsub(",","",DC$electricity_use))
+
+DC$natural_gas_use=as.character(DC$natural_gas_use)
+DC$natural_gas_use=as.numeric(gsub(",","",DC$natural_gas_use))
+
+DC$report_status=as.factor(DC$report_status)
+DC$ward=as.factor(DC$ward)
+DC$postal_code=as.factor(DC$postal_code)
+DC$primary_ptype_self=as.factor(DC$primary_ptype_self)
+DC$primary_ptype_epa=as.factor(DC$primary_ptype_epa)
+DC$metered_areas_energy=as.factor(DC$metered_areas_energy)
+DC$metered_areas_water=as.factor(DC$metered_areas_water)
+
+#remove outliers in site EUI now that datatype is applicable
+DC = DC[DC$site_eui < (quantile(DC$site_eui, 0.75,na.rm=TRUE) + 4*IQR(DC$site_eui,na.rm=TRUE)),]
+DC = DC[DC$site_eui > 1 ,]
+
+#calculate total site energy use and log total
+DC$total_site_energy_KBTU=DC$reported_gross_floor_area*DC$site_eui
+DC$log_total_site_energy_KBTU=log(DC$total_site_energy_KBTU)
+
+#define feature and output lists
+DC_features=c("report_status","ward","postal_code","year_built","primary_ptype_self","primary_ptype_epa","tax_record_floor_area","reported_gross_floor_area","water_use","metered_areas_energy","metered_areas_water")
+DC_outputs=c("electricity_use","natural_gas_use","energy_star_score","site_eui","weather_norm_site_eui","source_eui","weather_norm_source_eui","total_ghg_emissions","total_ghg_emissions_intensity","total_site_energy_KBTU","log_total_site_energy_KBTU")
+
+#split into features and outputs
+x_DC=DC[,DC_features]
+y_DC=DC[,DC_outputs]
+
+#re-impute just using original features
+mi = mice(x_DC,m=3,maxit=3,method='cart')
+x_DC = complete(mi)
+
+#recreate final dataframe
+DC_final = cbind(x_DC,y_DC)
+
+#save cleaned data to csv file
+write.csv(x_DC, file = "DC_features.csv")
+write.csv(y_DC, file = "DC_outputs.csv")
+write.csv(DC_final, file = "DC_final.csv")
+```
+
+

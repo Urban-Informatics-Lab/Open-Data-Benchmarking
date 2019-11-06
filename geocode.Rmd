@@ -1,0 +1,108 @@
+```{r}
+# geocode.Rmd: This file contains the code used to geocode datasets to detemine their lat/long. 
+# Geocoding was done for only a subset of the city datasets where no unique building identifier was 
+# included so that multiple datasets could be merged. This notebook uses the Stanford arcgis API for geocoding.
+
+# Copyright (C) 2018-2019 Jonathan Roth, Benjamin Lim, Rishee K. Jain     
+# This program is free software: you can redistribute it and/or modify it under the terms of the 
+# GNU Affero General Public License as published by the Free Software Foundation, either version 
+# 3 of the License, or (at your option) any later version.      
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+# See the GNU Affero General Public License for more details. You should have received a copy of 
+# the GNU Affero General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+
+
+##################################
+## Single Line Geocode Function ##
+##################################
+# The function takes:
+# - one address at a time as one string (SingleLine)
+# - token
+# - allow to return Postal codes if a full street address match cannot be found (default is TRUE)
+#
+# The function returns:
+# lon, lat -    The primary x/y coordinates of the address returned by the geocoding service in WGS84 
+# score -       The accuracy of the address match between 0 and 100.
+# locName -     The component locator used to return a particular match result
+# status -      Whether a batch geocode request results in a match (M), tie (T), or unmatch (U)
+# matchAddr -   Complete address returned for the geocode request.
+# side -        The side of the street where an address resides relative to the direction 
+#               of feature digitization
+# addressType - The match level for a geocode request. "PointAddress" is typically the 
+#               most spatially accurate match level. "StreetAddress" differs from PointAddress 
+#               because the house number is interpolated from a range of numbers. "StreetName" is similar,
+#               but without the house number.
+geocodeSL <- function (address, token, postal = TRUE){
+  require(httr)
+  
+  # Stanford geolocator
+  gserver <- "http://locator.stanford.edu/arcgis/rest/services/geocode/Composite_NorthAmerica/GeocodeServer/geocodeAddresses"
+  # template for SingleLine format
+  pref <- "{'records':[{'attributes':{'OBJECTID':1,'SingleLine':'"
+  suff <- "'}}]}"
+  
+  # url
+  url <- URLencode(paste0(gserver, "?addresses=", pref, address, suff, "&token=", token, ifelse(postal, "&f=json", "&f=json&category=Address")))
+  # submit
+  rawdata <- GET(url)
+  # parse JSON and process result
+  #print(address)
+  res = try(content(rawdata, "parsed", "application/json"),silent=TRUE)
+  #res <- content(rawdata, "parsed", "application/json")
+  if ('try-error' %in% class(res)) {
+    resdf = data.frame(lon = NA,
+                       lat = NA,
+                       score = NA, 
+                       locName = NA,
+                       status = NA,
+                       matchAddr = address,
+                       side = NA,
+                       addressType = 'FAILED')
+  } else {
+    resdf <- with(res$locations[[1]], {data.frame(lon = as.numeric(location$x),
+                                                  lat = as.numeric(location$y),
+                                                  score = score, 
+                                                  locName = attributes$Loc_name,
+                                                  status = attributes$Status,
+                                                  matchAddr = attributes$Match_addr,
+                                                  side = attributes$Side,
+                                                  addressType = attributes$Addr_type)})
+  }
+  return(resdf)
+}
+
+
+```
+
+
+```{r}
+#adr reads a formatted csv file of addresses, coordinates are appended to it line by line
+library(httr)
+token = '<include your token here>'
+adr <- read.csv("/Users/benjaminlim/Desktop/City\ Benchmarking/boston/boston_addresses_energy.csv")
+adr$x=as.character(adr$x)
+adr$X <- NULL
+adr$lat=0
+adr$lon=0
+adr$score=0
+len=length(adr$x)
+for (i in 1:len){
+  if (grepl("'",adr$x[[i]])){next}
+  if (grepl("-",adr$x[[i]])){next}
+  if (grepl("&",adr$x[[i]])){next}
+  temp=adr$x[[i]]
+  geo = geocodeSL(temp,token,postal = FALSE)
+  adr$lat[i]=as.numeric(geo$lat)
+  adr$lon[i]=as.numeric(geo$lon)
+  adr$score[i]=as.numeric(geo$score)
+}
+write.csv(adr, "boston_addresses_energy_geocoded.csv")
+temp=adr$x[[1]]
+temp='450 Serra Mall, Stanford, CA, 94305'
+geocodeSL(temp,token,postal=FALSE)
+```
+
+
