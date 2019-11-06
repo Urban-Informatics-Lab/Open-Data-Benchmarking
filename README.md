@@ -1,6 +1,8 @@
 # Open-Data-Energy-Benchmarking
 Code for the paper: Examining the feasibility of using open data to benchmark building energy usage in cities: a data science and policy perspective
 
+[![DOI](https://zenodo.org/badge/219892370.svg)](https://zenodo.org/badge/latestdoi/219892370)
+
 ### Lasso_RandomForest.Rmd
 This file contains the code for the main analysis of the paper. Specifically, this notebook runs a lasso regression and random forest model on the ten city datasets and the CBECS dataset. Additional functions are added to compute variable importance from theses models, which are run on each of the dataset independently. The datasets read in this file can be found in each of the subdirectories in this repository. 
 
